@@ -3022,7 +3022,7 @@ function LFPTab({TH, member, members, playerPool, openGames, onJoinPool, onLeave
             const t2=m?getTier(m.points):TIERS[0];
             return(
               <div key={p.id} style={{background:TH.bgCard,border:"1px solid rgba(34,197,94,.2)",borderRadius:14,padding:"13px 14px",display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:38,height:38,borderRadius:"50%",background:t2.color+"30",border:"2px solid "+t2.color+"60",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:12,color:t2.color,flexShrink:0,overflow:"hidden"}}>{members.find(x=>x.id===pid)?.photoUrl?<img src={members.find(x=>x.id===pid).photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:p.avatar}</div>
+                <div style={{width:38,height:38,borderRadius:"50%",background:t2.color+"30",border:"2px solid "+t2.color+"60",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:12,color:t2.color,flexShrink:0,overflow:"hidden"}}>{m?.photoUrl?<img src={m.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:p.avatar}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:TH.text}}>{p.name}</div>
                   <div style={{fontSize:10,color:TH.textMid,marginBottom:2}}>{p.date} · {p.slots.join(", ")}</div>
