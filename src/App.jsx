@@ -38,21 +38,53 @@ const sb = {
     };
   },
 
-  // Real-time subscription via Supabase Realtime WebSocket
+  // Poll Supabase every 5 seconds for new bookings (reliable fallback)
+  poll(table, interval=5000) {
+    let lastCheck = new Date().toISOString();
+    const timer = setInterval(async()=>{
+      try {
+        const base = `${SUPABASE_URL}/rest/v1/${table}`;
+        const r = await fetch(`${base}?created_at=gt.${lastCheck}&select=*&order=created_at.desc`, { headers: sb.headers });
+        if(r.ok) {
+          const rows = await r.json();
+          if(rows.length) {
+            lastCheck = new Date().toISOString();
+            sb._listeners[table]?.forEach(cb=>rows.forEach(row=>cb({record:row})));
+          }
+        }
+      } catch(e){}
+    }, interval);
+    return ()=>clearInterval(timer);
+  },
+
+  _listeners: {},
+
   subscribe(table, event, callback) {
-    const wsUrl = SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ topic:`realtime:public:${table}`, event:"phx_join", payload:{}, ref:"1" }));
-    };
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if(msg.event === "INSERT" || msg.event === "UPDATE" || msg.event === "DELETE") {
-        if(!event || msg.event === event) callback(msg.payload);
-      }
-    };
-    ws.onerror = (e) => console.warn("Realtime WS error:", e);
-    return () => ws.close(); // returns unsubscribe function
+    if(!sb._listeners[table]) sb._listeners[table]=[];
+    sb._listeners[table].push(callback);
+    // Also try WebSocket realtime
+    try {
+      const wsUrl = SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          topic:`realtime:public:${table}`,
+          event:"phx_join",
+          payload:{ config:{ broadcast:{ self:true }, presence:{ key:"" }, postgres_changes:[{ event:"*", schema:"public", table }] } },
+          ref:"1"
+        }));
+      };
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const rec = msg?.payload?.data?.record || msg?.payload?.record;
+          if(rec) callback({record:rec});
+        } catch(e){}
+      };
+      return () => { ws.close(); sb._listeners[table]=sb._listeners[table]?.filter(c=>c!==callback); };
+    } catch(e) {
+      return ()=>{};
+    }
   },
 };
 import { useState, useEffect, useRef } from "react";
@@ -347,8 +379,9 @@ export default function Root() {
     }
   },[screen]);
 
-  // ── REAL-TIME SUBSCRIPTIONS ──
+  // ── REAL-TIME SUBSCRIPTIONS + POLLING ──
   useEffect(()=>{
+    // WebSocket realtime
     const unsubBookings = sb.subscribe("bookings","INSERT",(payload)=>{
       const bk = dbToBooking(payload.record);
       setBookings(bs=>bs.find(b=>b.id===bk.id)?bs:[bk,...bs]);
@@ -360,7 +393,15 @@ export default function Root() {
       const mem = dbToMember(payload.record);
       setMembers(ms=>ms.find(m=>m.id===mem.id)?ms:[...ms,mem]);
     });
-    return()=>{ unsubBookings(); unsubMembers(); };
+    // Polling fallback — reload bookings every 8 seconds
+    const stopPoll = setInterval(async()=>{
+      try {
+        const t = await sb.from("bookings");
+        const bks = await t.select();
+        if(bks?.length) setBookings(bks.map(dbToBooking));
+      } catch(e){}
+    }, 8000);
+    return()=>{ unsubBookings(); unsubMembers(); clearInterval(stopPoll); };
   },[]);
 
   const addPoints = (memberId, pts) => {
