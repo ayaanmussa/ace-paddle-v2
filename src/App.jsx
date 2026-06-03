@@ -1,4 +1,60 @@
 /* eslint-disable */
+
+// ── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://hibardeplmlrrikspgpk.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpYmFyZGVwbG1scnJpa3NwZ3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDUwNTgsImV4cCI6MjA5NjA4MTA1OH0.lER3E3gP0zte6imbP-LzZBOKGD_K25flkkd4H-H1S6A";
+
+// Lightweight Supabase REST + Realtime client (no npm package needed)
+const sb = {
+  url: SUPABASE_URL,
+  key: SUPABASE_ANON,
+  headers: { "apikey": SUPABASE_ANON, "Authorization": "Bearer " + SUPABASE_ANON, "Content-Type": "application/json", "Prefer": "return=representation" },
+
+  async from(table) {
+    const base = `${SUPABASE_URL}/rest/v1/${table}`;
+    return {
+      async select(cols="*") {
+        const r = await fetch(`${base}?select=${cols}`, { headers: sb.headers });
+        if(!r.ok) throw new Error(await r.text());
+        return r.json();
+      },
+      async insert(row) {
+        const r = await fetch(base, { method:"POST", headers:sb.headers, body:JSON.stringify(row) });
+        if(!r.ok) throw new Error(await r.text());
+        return r.json();
+      },
+      async update(row, match) {
+        const q = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+        const r = await fetch(`${base}?${q}`, { method:"PATCH", headers:sb.headers, body:JSON.stringify(row) });
+        if(!r.ok) throw new Error(await r.text());
+        return r.json();
+      },
+      async delete(match) {
+        const q = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+        const r = await fetch(`${base}?${q}`, { method:"DELETE", headers:sb.headers });
+        if(!r.ok) throw new Error(await r.text());
+        return r.json();
+      },
+    };
+  },
+
+  // Real-time subscription via Supabase Realtime WebSocket
+  subscribe(table, event, callback) {
+    const wsUrl = SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+    const ws = new WebSocket(wsUrl);
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ topic:`realtime:public:${table}`, event:"phx_join", payload:{}, ref:"1" }));
+    };
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if(msg.event === "INSERT" || msg.event === "UPDATE" || msg.event === "DELETE") {
+        if(!event || msg.event === event) callback(msg.payload);
+      }
+    };
+    ws.onerror = (e) => console.warn("Realtime WS error:", e);
+    return () => ws.close(); // returns unsubscribe function
+  },
+};
 import { useState, useEffect, useRef } from "react";
 
 // ═══════════════════════════════════════════════════════════════
@@ -47,6 +103,56 @@ function loadSettings() {
   try { return JSON.parse(localStorage.getItem("ace_settings")||"null")||{...DEFAULT_PRICES}; } catch { return {...DEFAULT_PRICES}; }
 }
 function saveSettings(s) { try { localStorage.setItem("ace_settings",JSON.stringify(s)); } catch {} }
+
+// ── DB ↔ APP MAPPING HELPERS ─────────────────────────────────────────────────
+function dbToBooking(b) {
+  return {
+    id:b.id, ref:b.ref, courtId:b.court_id, dateKey:b.date_key,
+    date:b.date, time:b.time, endTime:b.end_time, dur:b.dur,
+    name:b.name, phone:b.phone, memberId:b.member_id,
+    status:b.status, pk:b.pk, price:b.price, pts:b.pts,
+    paid:b.paid, paidAt:b.paid_at, createdAt:b.created_at,
+  };
+}
+function bookingToDb(b) {
+  return {
+    id:b.id, ref:b.ref, court_id:b.courtId, date_key:b.dateKey,
+    date:b.date, time:b.time, end_time:b.endTime, dur:b.dur,
+    name:b.name, phone:b.phone, member_id:b.memberId,
+    status:b.status, pk:b.pk, price:b.price, pts:b.pts,
+    paid:b.paid||false, paid_at:b.paidAt||null, created_at:b.createdAt,
+  };
+}
+function dbToMember(m) {
+  return {
+    id:m.id, name:m.name, email:m.email, phone:m.phone,
+    password:m.password, gender:m.gender, avatar:m.avatar||m.name?.slice(0,2).toUpperCase(),
+    photoUrl:m.photo_url, points:m.points||100, tier:m.tier||"Bronze",
+    bookings:m.bookings||0, wins:m.wins||0,
+    ratingTotal:m.rating_total||0, ratingCount:m.rating_count||0,
+    showOnLeaderboard:m.show_on_leaderboard!==false,
+    showRating:m.show_rating!==false,
+    joined:m.joined||new Date().toISOString().slice(0,10),
+  };
+}
+function memberToDb(m) {
+  return {
+    id:m.id, name:m.name, email:m.email, phone:m.phone,
+    password:m.password, gender:m.gender, avatar:m.avatar,
+    photo_url:m.photoUrl||null, points:m.points, tier:m.tier,
+    bookings:m.bookings, wins:m.wins,
+    rating_total:m.ratingTotal, rating_count:m.ratingCount,
+    show_on_leaderboard:m.showOnLeaderboard!==false,
+    show_rating:m.showRating!==false,
+    joined:m.joined,
+  };
+}
+function dbToBlockout(b) {
+  return {
+    id:b.id, courtId:b.court_id, dateKey:b.date_key,
+    allDay:b.all_day, startTime:b.start_time, endTime:b.end_time, reason:b.reason,
+  };
+}
 
 // ── THEME TOKENS ──────────────────────────────────────────────────────────────
 const DARK = {
@@ -208,7 +314,54 @@ export default function Root() {
   ]);
 
   // Splash auto-advance
-  useEffect(()=>{ if(screen==="splash"){ const t=setTimeout(()=>setScreen("home"),2200); return()=>clearTimeout(t); }},[screen]);
+  // ── LOAD DATA FROM SUPABASE ON MOUNT ──
+  useEffect(()=>{
+    if(screen==="splash"){
+      const t=setTimeout(()=>setScreen("home"),2200);
+      // Load bookings, members, blockouts from Supabase
+      Promise.all([
+        sb.from("bookings").then(t=>t.select()),
+        sb.from("members").then(t=>t.select()),
+        sb.from("blockouts").then(t=>t.select()),
+        sb.from("waitlist").then(t=>t.select()),
+        sb.from("notifications").then(t=>t.select()),
+      ]).then(([bks, mems, bls, wl, notifs])=>{
+        if(bks?.length)  setBookings(bks.map(dbToBooking));
+        if(mems?.length) setMembers(prev=>{
+          // Merge DB members with mock members, DB takes priority
+          const dbIds = mems.map(m=>m.id);
+          const filtered = prev.filter(m=>!dbIds.includes(m.id));
+          return [...mems.map(dbToMember), ...filtered];
+        });
+        if(bls?.length)  setBlockouts(bls.map(dbToBlockout));
+        if(wl?.length)   setWaitlist(wl);
+        if(notifs?.length) setNotifications(notifs);
+        // Restore remembered session against DB members
+        const session = loadSession();
+        if(session) {
+          const mem = mems?.find(m=>m.id===session.id);
+          if(mem) setMember(dbToMember(mem));
+        }
+      }).catch(e=>console.warn("Supabase load error:", e));
+      return()=>clearTimeout(t);
+    }
+  },[screen]);
+
+  // ── REAL-TIME SUBSCRIPTIONS ──
+  useEffect(()=>{
+    const unsubBookings = sb.subscribe("bookings","INSERT",(payload)=>{
+      const bk = dbToBooking(payload.record);
+      setBookings(bs=>bs.find(b=>b.id===bk.id)?bs:[bk,...bs]);
+      setNotifications(ns=>[{id:"n"+Date.now(),bookingId:bk.id,type:"new",
+        msg:"📩 New: "+bk.name+" — Court "+bk.courtId+" · "+bk.date+" · "+bk.time+"–"+bk.endTime+" · "+bk.ref,
+        time:new Date().toISOString(),read:false},...ns]);
+    });
+    const unsubMembers = sb.subscribe("members","INSERT",(payload)=>{
+      const mem = dbToMember(payload.record);
+      setMembers(ms=>ms.find(m=>m.id===mem.id)?ms:[...ms,mem]);
+    });
+    return()=>{ unsubBookings(); unsubMembers(); };
+  },[]);
 
   const addPoints = (memberId, pts) => {
     setMembers(ms=>ms.map(m=>m.id===memberId?{...m,points:m.points+pts}:m));
@@ -266,15 +419,12 @@ export default function Root() {
           bookings={bookings}
           waitlist={waitlist}
           onBook={async bk=>{
-            // Step 1: Optimistic — block slot in local state IMMEDIATELY
+            // Step 1: Optimistic — block slot instantly
             setBookings(bs=>[bk,...bs]);
             setNotifications(ns=>[{id:"n"+Date.now(),bookingId:bk.id,type:"new",msg:"📩 New: "+bk.name+" — Court "+bk.courtId+" · "+bk.date+" · "+bk.time+"–"+bk.endTime+" · "+bk.ref,time:new Date().toISOString(),read:false},...ns]);
-            // Step 2 (TODO — Supabase): persist to database
-            // if(supadb.isConnected) {
-            //   const {error} = await supabase.from("bookings").insert([bk]);
-            //   if(error) { setBookings(bs=>bs.filter(b=>b.id!==bk.id)); alert("Booking failed — please try again"); }
-            // }
-            // Real-time subscription in Root will broadcast to all devices automatically.
+            // Step 2: Persist to Supabase (broadcasts to all devices via realtime)
+            try { await (await sb.from("bookings")).insert(bookingToDb(bk)); }
+            catch(e){ console.warn("Booking save error:",e); }
           }}
           onWaitlist={w=>setWaitlist(ws=>[w,...ws])}
           onCancelWaitlist={id=>setWaitlist(ws=>ws.filter(w=>w.id!==id))}
@@ -1992,11 +2142,13 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
   const [step, setStep] = useState(1); // 1=form, 2=success
   const [err, setErr] = useState("");
 
-  function submit() {
+  async function submit() {
     if(!f.name.trim()||!f.email.trim()||!f.phone.trim()||!f.password.trim()){setErr("All fields required");return;}
     if(!f.gender){setErr("Please select your gender");return;}
     const initials = f.name.trim().split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase();
     const m = {id:"m"+Date.now(),name:f.name.trim(),email:f.email.trim(),phone:f.phone.trim(),password:f.password.trim(),gender:f.gender,points:100,tier:"Bronze",avatar:initials,joined:new Date().toISOString().slice(0,10),bookings:0,wins:0,ratingTotal:0,ratingCount:0,showOnLeaderboard:f.showOnLeaderboard,showRating:f.showRating};
+    // Save to Supabase
+    try { await (await sb.from("members")).insert(memberToDb(m)); } catch(e){ console.warn("Member save error:",e); }
     setStep(2);
     setTimeout(()=>onDone(m),1800);
   }
