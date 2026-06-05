@@ -4,88 +4,102 @@
 const SUPABASE_URL  = "https://hibardeplmlrrikspgpk.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpYmFyZGVwbG1scnJpa3NwZ3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDUwNTgsImV4cCI6MjA5NjA4MTA1OH0.lER3E3gP0zte6imbP-LzZBOKGD_K25flkkd4H-H1S6A";
 
-// Lightweight Supabase REST + Realtime client (no npm package needed)
-const sb = {
-  url: SUPABASE_URL,
-  key: SUPABASE_ANON,
-  headers: { "apikey": SUPABASE_ANON, "Authorization": "Bearer " + SUPABASE_ANON, "Content-Type": "application/json", "Prefer": "return=representation" },
-
-  async from(table) {
-    const base = `${SUPABASE_URL}/rest/v1/${table}`;
-    return {
-      async select(cols="*") {
-        const r = await fetch(`${base}?select=${cols}`, { headers: sb.headers });
-        if(!r.ok) throw new Error(await r.text());
-        return r.json();
-      },
-      async insert(row) {
-        const r = await fetch(base, { method:"POST", headers:sb.headers, body:JSON.stringify(row) });
-        if(!r.ok) throw new Error(await r.text());
-        return r.json();
-      },
-      async update(row, match) {
-        const q = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
-        const r = await fetch(`${base}?${q}`, { method:"PATCH", headers:sb.headers, body:JSON.stringify(row) });
-        if(!r.ok) throw new Error(await r.text());
-        return r.json();
-      },
-      async delete(match) {
-        const q = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
-        const r = await fetch(`${base}?${q}`, { method:"DELETE", headers:sb.headers });
-        if(!r.ok) throw new Error(await r.text());
-        return r.json();
-      },
-    };
+// Lightweight Supabase REST client
+const db = {
+  headers: {
+    "apikey": SUPABASE_ANON,
+    "Authorization": "Bearer " + SUPABASE_ANON,
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
   },
 
-  // Poll Supabase every 5 seconds for new bookings (reliable fallback)
-  poll(table, interval=5000) {
-    let lastCheck = new Date().toISOString();
-    const timer = setInterval(async()=>{
+  async select(table, query="") {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${query}`, { headers: db.headers });
+    if(!r.ok) { console.warn("Supabase select error:", await r.text()); return []; }
+    return r.json();
+  },
+
+  async insert(table, row) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method:"POST", headers:db.headers, body:JSON.stringify(row)
+    });
+    if(!r.ok) { console.warn("Supabase insert error:", await r.text()); return null; }
+    const res = await r.json();
+    return Array.isArray(res) ? res[0] : res;
+  },
+
+  async update(table, row, match) {
+    const q = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${q}`, {
+      method:"PATCH", headers:db.headers, body:JSON.stringify(row)
+    });
+    if(!r.ok) { console.warn("Supabase update error:", await r.text()); return null; }
+    return r.json();
+  },
+
+  async delete(table, match) {
+    const q = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${q}`, {
+      method:"DELETE", headers:db.headers
+    });
+    if(!r.ok) { console.warn("Supabase delete error:", await r.text()); return null; }
+    return r.json();
+  },
+
+  // Realtime polling — checks for new records every 6 seconds
+  _polls: {},
+  startPolling(table, onNew, interval=6000) {
+    if(db._polls[table]) return;
+    let lastId = null;
+    db._polls[table] = setInterval(async()=>{
       try {
-        const base = `${SUPABASE_URL}/rest/v1/${table}`;
-        const r = await fetch(`${base}?created_at=gt.${lastCheck}&select=*&order=created_at.desc`, { headers: sb.headers });
-        if(r.ok) {
-          const rows = await r.json();
-          if(rows.length) {
-            lastCheck = new Date().toISOString();
-            sb._listeners[table]?.forEach(cb=>rows.forEach(row=>cb({record:row})));
-          }
+        const rows = await db.select(table, "&order=created_at.desc&limit=5");
+        if(!rows?.length) return;
+        const newest = rows[0];
+        if(lastId && newest.id !== lastId) {
+          // New records appeared
+          rows.filter(r=>r.id!==lastId).forEach(r=>onNew(r));
         }
+        lastId = newest.id;
       } catch(e){}
     }, interval);
-    return ()=>clearInterval(timer);
+  },
+  stopPolling(table) {
+    if(db._polls[table]) { clearInterval(db._polls[table]); delete db._polls[table]; }
   },
 
-  _listeners: {},
-
-  subscribe(table, event, callback) {
-    if(!sb._listeners[table]) sb._listeners[table]=[];
-    sb._listeners[table].push(callback);
-    // Also try WebSocket realtime
+  // WebSocket realtime
+  subscribe(table, callback) {
     try {
       const wsUrl = SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
       const ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        ws.send(JSON.stringify({
-          topic:`realtime:public:${table}`,
-          event:"phx_join",
-          payload:{ config:{ broadcast:{ self:true }, presence:{ key:"" }, postgres_changes:[{ event:"*", schema:"public", table }] } },
-          ref:"1"
-        }));
-      };
+      ws.onopen = () => ws.send(JSON.stringify({
+        topic:`realtime:public:${table}`, event:"phx_join",
+        payload:{ config:{ postgres_changes:[{event:"*",schema:"public",table}] } }, ref:"1"
+      }));
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          const rec = msg?.payload?.data?.record || msg?.payload?.record;
-          if(rec) callback({record:rec});
+          const rec = msg?.payload?.data?.record;
+          if(rec) callback(rec);
         } catch(e){}
       };
-      return () => { ws.close(); sb._listeners[table]=sb._listeners[table]?.filter(c=>c!==callback); };
-    } catch(e) {
-      return ()=>{};
-    }
+      return ()=>ws.close();
+    } catch(e) { return ()=>{}; }
   },
+};
+
+// Keep sb as alias for backward compat
+const sb = {
+  from: (table) => ({
+    select: (cols="*") => db.select(table),
+    insert: (row) => db.insert(table, row),
+    update: (row, match) => db.update(table, row, match),
+    delete: (match) => db.delete(table, match),
+  }),
+  headers: db.headers,
+  subscribe: (table, event, cb) => db.subscribe(table, cb),
+  _listeners: {},
 };
 import { useState, useEffect, useRef } from "react";
 
@@ -349,11 +363,11 @@ export default function Root() {
       const minSplash = new Promise(r=>setTimeout(r, 1800)); // min 1.8s splash
 
       Promise.all([
-        sb.from("bookings").then(t=>t.select()),
-        sb.from("members").then(t=>t.select()),
-        sb.from("blockouts").then(t=>t.select()),
-        sb.from("waitlist").then(t=>t.select()),
-        sb.from("notifications").then(t=>t.select()),
+        db.select("bookings"),
+        db.select("members"),
+        db.select("blockouts"),
+        db.select("waitlist"),
+        db.select("notifications"),
         minSplash,
       ]).then(([bks, mems, bls, wl, notifs])=>{
         if(bks?.length)  setBookings(bks.map(dbToBooking));
@@ -367,13 +381,11 @@ export default function Root() {
           if(mem) {
             setMember(dbToMember(mem));
           } else if(session.id) {
-            // Fetch this member directly if not in list
-            sb.from("members").then(t=>
-              fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${session.id}&select=*`,{headers:sb.headers})
-                .then(r=>r.json())
-                .then(rows=>{ if(rows?.[0]) setMember(dbToMember(rows[0])); })
-                .catch(()=>{})
-            );
+            // Fetch this member directly from Supabase by ID
+            fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${session.id}&select=*`,{headers:db.headers})
+              .then(r=>r.json())
+              .then(rows=>{ if(rows?.[0]) setMember(dbToMember(rows[0])); })
+              .catch(()=>{});
           }
         }
       }).catch(e=>console.warn("Supabase load error:", e))
@@ -398,8 +410,7 @@ export default function Root() {
     // Polling fallback — reload bookings every 8 seconds
     const stopPoll = setInterval(async()=>{
       try {
-        const t = await sb.from("bookings");
-        const bks = await t.select();
+        const bks = await db.select("bookings");
         if(bks?.length) setBookings(bks.map(dbToBooking));
       } catch(e){}
     }, 8000);
@@ -466,7 +477,7 @@ export default function Root() {
             setBookings(bs=>[bk,...bs]);
             setNotifications(ns=>[{id:"n"+Date.now(),bookingId:bk.id,type:"new",msg:"📩 New: "+bk.name+" — Court "+bk.courtId+" · "+bk.date+" · "+bk.time+"–"+bk.endTime+" · "+bk.ref,time:new Date().toISOString(),read:false},...ns]);
             // Step 2: Persist to Supabase (broadcasts to all devices via realtime)
-            try { await (await sb.from("bookings")).insert(bookingToDb(bk)); }
+            try { await db.insert("bookings", bookingToDb(bk)); }
             catch(e){ console.warn("Booking save error:",e); }
           }}
           onWaitlist={w=>setWaitlist(ws=>[w,...ws])}
@@ -2199,7 +2210,7 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
     const initials = f.name.trim().split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase();
     const m = {id:"m"+Date.now(),name:f.name.trim(),email:f.email.trim(),phone:f.phone.trim(),password:f.password.trim(),gender:f.gender,points:100,tier:"Bronze",avatar:initials,joined:new Date().toISOString().slice(0,10),bookings:0,wins:0,ratingTotal:0,ratingCount:0,showOnLeaderboard:f.showOnLeaderboard,showRating:f.showRating};
     // Save to Supabase
-    try { await (await sb.from("members")).insert(memberToDb(m)); } catch(e){ console.warn("Member save error:",e); }
+    try { await db.insert("members", memberToDb(m)); } catch(e){ console.warn("Member save error:",e); }
     setStep(2);
     setTimeout(()=>onDone(m),1800);
   }
