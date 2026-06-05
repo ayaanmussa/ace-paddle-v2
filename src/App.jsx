@@ -342,37 +342,42 @@ export default function Root() {
     {id:"p2",title:"Off-Peak Bonanza",desc:"MWK 10,000 off every off-peak session",discType:"fixed",discVal:10000,dateType:"always",weekday:"",timeFrom:"05:00",timeTo:"16:00",active:false,createdAt:"2025-06-01"},
   ]);
 
-  // Splash auto-advance
   // ── LOAD DATA FROM SUPABASE ON MOUNT ──
   useEffect(()=>{
     if(screen==="splash"){
-      const t=setTimeout(()=>setScreen("home"),2200);
-      // Load bookings, members, blockouts from Supabase
+      const session = loadSession();
+      const minSplash = new Promise(r=>setTimeout(r, 1800)); // min 1.8s splash
+
       Promise.all([
         sb.from("bookings").then(t=>t.select()),
         sb.from("members").then(t=>t.select()),
         sb.from("blockouts").then(t=>t.select()),
         sb.from("waitlist").then(t=>t.select()),
         sb.from("notifications").then(t=>t.select()),
+        minSplash,
       ]).then(([bks, mems, bls, wl, notifs])=>{
         if(bks?.length)  setBookings(bks.map(dbToBooking));
-        if(mems?.length) setMembers(prev=>{
-          // Merge DB members with mock members, DB takes priority
-          const dbIds = mems.map(m=>m.id);
-          const filtered = prev.filter(m=>!dbIds.includes(m.id));
-          return [...mems.map(dbToMember), ...filtered];
-        });
+        if(mems?.length) setMembers([...mems.map(dbToMember)]);
         if(bls?.length)  setBlockouts(bls.map(dbToBlockout));
         if(wl?.length)   setWaitlist(wl);
         if(notifs?.length) setNotifications(notifs);
-        // Restore remembered session against DB members
-        const session = loadSession();
+        // Restore remembered session AFTER members are loaded from DB
         if(session) {
           const mem = mems?.find(m=>m.id===session.id);
-          if(mem) setMember(dbToMember(mem));
+          if(mem) {
+            setMember(dbToMember(mem));
+          } else if(session.id) {
+            // Fetch this member directly if not in list
+            sb.from("members").then(t=>
+              fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${session.id}&select=*`,{headers:sb.headers})
+                .then(r=>r.json())
+                .then(rows=>{ if(rows?.[0]) setMember(dbToMember(rows[0])); })
+                .catch(()=>{})
+            );
+          }
         }
-      }).catch(e=>console.warn("Supabase load error:", e));
-      return()=>clearTimeout(t);
+      }).catch(e=>console.warn("Supabase load error:", e))
+      .finally(()=>setScreen("home"));
     }
   },[screen]);
 
