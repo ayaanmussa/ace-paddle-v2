@@ -2207,10 +2207,17 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
   async function submit() {
     if(!f.name.trim()||!f.email.trim()||!f.phone.trim()||!f.password.trim()){setErr("All fields required");return;}
     if(!f.gender){setErr("Please select your gender");return;}
+    setErr("Creating account...");
     const initials = f.name.trim().split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase();
     const m = {id:"m"+Date.now(),name:f.name.trim(),email:f.email.trim(),phone:f.phone.trim(),password:f.password.trim(),gender:f.gender,points:100,tier:"Bronze",avatar:initials,joined:new Date().toISOString().slice(0,10),bookings:0,wins:0,ratingTotal:0,ratingCount:0,showOnLeaderboard:f.showOnLeaderboard,showRating:f.showRating};
-    // Save to Supabase
-    try { await db.insert("members", memberToDb(m)); } catch(e){ console.warn("Member save error:",e); }
+    // Save to Supabase — must succeed before proceeding
+    const saved = await db.insert("members", memberToDb(m));
+    if(saved===null) {
+      // Try to see if email already exists
+      setErr("Could not create account. Email may already be registered.");
+      return;
+    }
+    setErr("");
     setStep(2);
     setTimeout(()=>onDone(m),1800);
   }
@@ -2292,16 +2299,27 @@ function LoginScreen({TH, members, onDone, onBack, onRegister}) {
   const [rememberMe, setRememberMe] = useState(true); // default ON
   const [err,        setErr]        = useState("");
 
-  function login() {
-    const m = members.find(x=>x.email.toLowerCase()===email.trim().toLowerCase());
-    if(!m){setErr("No account found with that email");return;}
+  async function login() {
+    if(!email.trim()){setErr("Please enter your email");return;}
     if(!pw.trim()){setErr("Please enter your password");return;}
-    const correct = m.password||"demo1234";
-    if(pw!==correct){setErr("Incorrect password");return;}
-    // Save session if Remember Me is on
-    if(rememberMe) saveSession(m);
-    else clearSession();
-    onDone(m);
+    setErr("Signing in...");
+    // Query Supabase directly — don't rely on local members state
+    try {
+      const rows = await fetch(
+        `${SUPABASE_URL}/rest/v1/members?email=eq.${encodeURIComponent(email.trim().toLowerCase())}&select=*`,
+        {headers:db.headers}
+      ).then(r=>r.json());
+      if(!rows?.length){setErr("No account found with that email");return;}
+      const m = dbToMember(rows[0]);
+      const correct = m.password||"demo1234";
+      if(pw.trim()!==correct){setErr("Incorrect password");return;}
+      if(rememberMe) saveSession(m);
+      else clearSession();
+      setErr("");
+      onDone(m);
+    } catch(e) {
+      setErr("Connection error. Please check your internet and try again.");
+    }
   }
 
   const I = {width:"100%",background:TH.bgCard,border:"1.5px solid "+TH.border,borderRadius:13,padding:"14px 16px",color:TH.text,fontSize:14};
