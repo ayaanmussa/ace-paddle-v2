@@ -2322,16 +2322,19 @@ function LoginScreen({TH, members, onDone, onBack, onRegister}) {
     if(!email.trim()){setErr("Please enter your email");return;}
     if(!pw.trim()){setErr("Please enter your password");return;}
     setErr("Signing in...");
-    // Query Supabase directly — don't rely on local members state
     try {
-      const rows = await fetch(
-        `${SUPABASE_URL}/rest/v1/members?email=eq.${encodeURIComponent(email.trim().toLowerCase())}&select=*`,
-        {headers:db.headers}
-      ).then(r=>r.json());
-      if(!rows?.length){setErr("No account found with that email");return;}
+      // Query Supabase directly with case-insensitive email match
+      const emailClean = email.trim().toLowerCase();
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/members?email=ilike.${encodeURIComponent(emailClean)}&select=*`,
+        { headers: db.headers }
+      );
+      if(!r.ok){ setErr("Connection error. Please try again."); return; }
+      const rows = await r.json();
+      if(!rows?.length){ setErr("No account found with that email"); return; }
       const m = dbToMember(rows[0]);
       const correct = m.password||"demo1234";
-      if(pw.trim()!==correct){setErr("Incorrect password");return;}
+      if(pw.trim()!==correct){ setErr("Incorrect password"); return; }
       if(rememberMe) saveSession(m);
       else clearSession();
       setErr("");
