@@ -14,18 +14,33 @@ const db = {
   },
 
   async select(table, query="") {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${query}`, { headers: db.headers });
-    if(!r.ok) { console.warn("Supabase select error:", await r.text()); return []; }
-    return r.json();
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${query}`, {
+        headers: db.headers
+      });
+      if(!r.ok) { console.warn("Supabase select error:", r.status, await r.text()); return []; }
+      return r.json();
+    } catch(e) {
+      console.warn("Supabase select network error:", e);
+      return [];
+    }
   },
 
   async insert(table, row) {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method:"POST", headers:db.headers, body:JSON.stringify(row)
-    });
-    if(!r.ok) { console.warn("Supabase insert error:", await r.text()); return null; }
-    const res = await r.json();
-    return Array.isArray(res) ? res[0] : res;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method:"POST",
+        headers:{...db.headers, "Prefer":"return=minimal"},
+        body:JSON.stringify(row)
+      });
+      if(r.status===201||r.status===200) return row; // success
+      const errText = await r.text();
+      console.warn(`Supabase insert error (${r.status}):`, errText);
+      return null;
+    } catch(e) {
+      console.warn("Supabase insert network error:", e);
+      return null;
+    }
   },
 
   async update(table, row, match) {
@@ -2213,8 +2228,7 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
     // Save to Supabase — must succeed before proceeding
     const saved = await db.insert("members", memberToDb(m));
     if(saved===null) {
-      // Try to see if email already exists
-      setErr("Could not create account. Email may already be registered.");
+      setErr("Could not save account. Please try a different email or check your connection.");
       return;
     }
     setErr("");
