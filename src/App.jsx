@@ -92,15 +92,11 @@ import { useState, useEffect, useRef } from "react";
 // ═══════════════════════════════════════════════════════════════
 // MOCK DATA
 // ═══════════════════════════════════════════════════════════════
-const MOCK_MEMBERS = [
-  { id:"m0", name:"Demo Member",    email:"demo@ace.com",   phone:"0880000000", points:100,  tier:"Bronze",  avatar:"DM", gender:"male",   joined:"2026-01-01", bookings:0,  wins:0,  ratingTotal:0,   ratingCount:0,  showOnLeaderboard:true, showRating:true },
-  { id:"m1", name:"Ayaan Mussa",    email:"ayaan@ace.com",  phone:"0881234567", points:2450, tier:"Gold",    avatar:"AM", gender:"male",   joined:"2025-01-10", bookings:34, wins:18, ratingTotal:186, ratingCount:42, showOnLeaderboard:true, showRating:true },
-  { id:"m2", name:"Zara Ahmed",     email:"zara@ace.com",   phone:"0882345678", points:3600, tier:"Platinum",avatar:"ZA", gender:"female", joined:"2024-11-05", bookings:58, wins:31, ratingTotal:276, ratingCount:60, showOnLeaderboard:true, showRating:true },
-  { id:"m3", name:"Tariq Hassan",   email:"tariq@ace.com",  phone:"0883456789", points:1850, tier:"Silver",  avatar:"TH", gender:"male",   joined:"2025-03-22", bookings:19, wins:9,  ratingTotal:72,  ratingCount:18, showOnLeaderboard:true, showRating:true },
-  { id:"m4", name:"Nadia Patel",    email:"nadia@ace.com",  phone:"0884567890", points:420,  tier:"Bronze",  avatar:"NP", gender:"female", joined:"2025-05-01", bookings:6,  wins:2,  ratingTotal:18,  ratingCount:5,  showOnLeaderboard:true, showRating:true },
-  { id:"m5", name:"Omar Rashid",    email:"omar@ace.com",   phone:"0885678901", points:2800, tier:"Gold",    avatar:"OR", gender:"male",   joined:"2025-02-14", bookings:44, wins:22, ratingTotal:210, ratingCount:46, showOnLeaderboard:true, showRating:true },
-  { id:"m6", name:"Layla Ibrahim",  email:"layla@ace.com",  phone:"0886789012", points:980,  tier:"Bronze",  avatar:"LI", gender:"female", joined:"2025-04-18", bookings:11, wins:4,  ratingTotal:44,  ratingCount:12, showOnLeaderboard:true, showRating:true },
-];
+const MOCK_MEMBERS = []; // Real members loaded from Supabase
+
+// ═══════════════════════════════════════════════════════════════
+// MOCK DATA
+// ═══════════════════════════════════════════════════════════════
 
 const avgRating = m => m.ratingCount > 0 ? (m.ratingTotal / m.ratingCount) : 0;
 
@@ -322,13 +318,14 @@ function isSlotBooked(bookings, courtId, dateKey, startTime, durH, blockouts) {
 // ═══════════════════════════════════════════════════════════════
 export default function Root() {
   const [screen,   setScreen]   = useState("splash");
+  const [adminRole, setAdminRole] = useState(null); // null | "admin" | "reception"
   const [themeKey, setThemeKey] = useState(loadTheme); // "dark" | "light"
   const TH = themeKey==="light" ? LIGHT : DARK;
   function toggleTheme() { const n=themeKey==="dark"?"light":"dark"; setThemeKey(n); saveTheme(n); }
   const [member,   setMember]   = useState(null);
   const [members,  setMembers]  = useState(MOCK_MEMBERS);
   const [rewards,  setRewards]  = useState(MOCK_REWARDS);
-  const [friends,  setFriends]  = useState(["m2","m5"]);
+  const [friends,  setFriends]  = useState([]);
   const [bookings,       setBookings]       = useState([]);
   const [notifications,  setNotifications]  = useState([]);
   const [waitlist,  setWaitlist]  = useState([]);
@@ -506,6 +503,13 @@ export default function Root() {
       {screen==="profile"  && <ProfileScreen TH={TH} member={member} members={members} friends={friends} setFriends={setFriends} setMembers={setMembers} setMember={setMember} bookings={bookings} onNav={setScreen} onLogin={()=>setScreen("login")} onRegister={()=>setScreen("register")} onLogout={()=>{setMember(null);clearSession();setScreen("home");}}/>}
       {screen==="register" && <RegisterScreen TH={TH} onDone={(m)=>{setMember(m);setMembers(ms=>[...ms,m]);setScreen("home");}} onBack={()=>setScreen("home")} onLogin={()=>setScreen("login")}/>}
       {screen==="login"    && <LoginScreen TH={TH} members={members} onDone={(m)=>{setMember(m);setScreen("home");}} onBack={()=>setScreen("home")} onRegister={()=>setScreen("register")}/>}
+      {screen==="reception" && <ReceptionScreen
+          TH={TH}
+          bookings={bookings}
+          members={members}
+          settings={settings}
+          onUpdateBooking={(id,p)=>setBookings(bs=>bs.map(b=>b.id===id?{...b,...p}:b))}
+          onBack={()=>setScreen("home")}/>}
       {screen==="admin"    && <AdminScreen
           TH={TH}
           members={members} rewards={rewards} bookings={bookings} waitlist={waitlist}
@@ -515,6 +519,7 @@ export default function Root() {
           onCreateTournament={t=>setTournaments(ts=>[t,...ts])}
           onUpdateBooking={(id,p)=>setBookings(bs=>bs.map(b=>b.id===id?{...b,...p}:b))}
           onCancelWaitlist={(id)=>setWaitlist(ws=>ws.filter(w=>w.id!==id))}
+          onRemoveMember={(id)=>setMembers(ms=>ms.filter(m=>m.id!==id))}
           settings={settings}
           onSaveSettings={(s)=>{setSettings(s);saveSettings(s);}}
           blockouts={blockouts}
@@ -2323,30 +2328,48 @@ function LoginScreen({TH, members, onDone, onBack, onRegister}) {
 // ADMIN — FULL PORTAL
 // ═══════════════════════════════════════════════════════════════
 const ADMIN_PASS = "ace2024";
+const ADMIN_USER = "admin@ace";
+const RECEPTION_PASS = "ace2020";
+const RECEPTION_USER = "reception";
 
-function AdminScreen({TH, members,rewards,bookings,waitlist,promoOffers,setPromoOffers,tournaments,settings,onSaveSettings,blockouts,onAddBlockout,onRemoveBlockout,notifications,onMarkRead,onClearNotifs,setRewards,onAddPoints,onUpdateBooking,onCancelWaitlist,onUpdateTournament,onCreateTournament,redemptions,onMarkRedemptionUsed,onBack}) {
+function AdminScreen({TH, members,rewards,bookings,waitlist,promoOffers,setPromoOffers,tournaments,settings,onSaveSettings,blockouts,onAddBlockout,onRemoveBlockout,notifications,onMarkRead,onClearNotifs,setRewards,onAddPoints,onUpdateBooking,onCancelWaitlist,onUpdateTournament,onCreateTournament,redemptions,onMarkRedemptionUsed,onRemoveMember,onBack}) {
   const [auth,   setAuth]  = useState(false);
+  const [user,   setUser]  = useState("");
   const [pw,     setPw]    = useState("");
   const [pwErr,  setPwErr] = useState("");
   const [tab,    setTab]   = useState("today");
+
+  function doLogin() {
+    const u = user.trim().toLowerCase();
+    const p = pw.trim();
+    if((u==="admin@ace"||u==="admin") && p===ADMIN_PASS) { setAuth("admin"); setPwErr(""); return; }
+    if(u==="reception" && p===RECEPTION_PASS) { setAuth("reception"); setPwErr(""); return; }
+    setPwErr("Incorrect username or password");
+  }
+
+  // Reception login goes to ReceptionScreen
+  if(auth==="reception") return <ReceptionScreen TH={TH} bookings={bookings} members={members} settings={settings} onUpdateBooking={onUpdateBooking} onBack={()=>{setAuth(false);setPw("");setUser("");}}/>;
 
   if(!auth) return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
       <div style={{width:"100%",maxWidth:380,background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:28,padding:"40px 28px",textAlign:"center"}} className="fu">
         <div style={{width:64,height:64,borderRadius:18,margin:"0 auto 18px",background:"linear-gradient(135deg,#0c1e30,#080e1a)",border:"1px solid "+TH.border,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>🔐</div>
-        <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3,color:TH.text,marginBottom:4}}>Admin Portal</div>
-        <div style={{fontSize:12,color:TH.textMid,marginBottom:22}}>Staff access only</div>
+        <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:26,letterSpacing:3,color:TH.text,marginBottom:4}}>Staff Portal</div>
+        <div style={{fontSize:12,color:TH.textMid,marginBottom:22}}>ACE Padel Club — Staff Access Only</div>
+        <input type="text" placeholder="Username" value={user}
+          onChange={e=>{setUser(e.target.value);setPwErr("");}}
+          onKeyDown={e=>e.key==="Enter"&&doLogin()}
+          style={{width:"100%",background:TH.bgInput,border:"1.5px solid "+TH.border,borderRadius:13,padding:"13px 15px",color:TH.text,fontSize:14,marginBottom:10,outline:"none"}}/>
         <input type="password" placeholder="Password" value={pw}
           onChange={e=>{setPw(e.target.value);setPwErr("");}}
-          onKeyDown={e=>e.key==="Enter"&&(pw===ADMIN_PASS?setAuth(true):setPwErr("Incorrect password"))}
+          onKeyDown={e=>e.key==="Enter"&&doLogin()}
           style={{width:"100%",background:TH.bgInput,border:"1.5px solid "+TH.border,borderRadius:13,padding:"13px 15px",color:TH.text,fontSize:14,marginBottom:10,outline:"none"}}/>
         {pwErr&&<div style={{color:"#f87171",fontSize:13,marginBottom:10}}>{pwErr}</div>}
-        <button onClick={()=>pw===ADMIN_PASS?setAuth(true):setPwErr("Incorrect password")}
-          style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#f97316,#b91c1c)",color:TH.text,fontSize:15,fontWeight:900,cursor:"pointer",marginBottom:10}}>
+        <button onClick={doLogin}
+          style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#f97316,#b91c1c)",color:"#fff",fontSize:15,fontWeight:900,cursor:"pointer",marginBottom:10}}>
           Sign In →
         </button>
         <button onClick={onBack} style={{width:"100%",padding:"11px",borderRadius:13,border:"1.5px solid "+TH.border,background:"transparent",color:TH.textMid,fontSize:13,fontWeight:700,cursor:"pointer"}}>← Back</button>
-        <div style={{fontSize:10,color:TH.borderMid,marginTop:14}}>Password: ace2024</div>
       </div>
     </div>
   );
@@ -2359,7 +2382,7 @@ function AdminScreen({TH, members,rewards,bookings,waitlist,promoOffers,setPromo
 
   const unread = (notifications||[]).filter(n=>!n.read).length;
   const tabs=[
-    ["today","📊 Today"],["bookings","📋 Bookings"],["members","👥 Members"],
+    ["today","📊 Today"],["daily","📅 Daily Report"],["bookings","📋 Bookings"],["members","👥 Members"],
     ["waitlist","⏳ Waitlist"],["blockouts","🚫 Block-outs"],["tournaments","🏓 Tournaments"],
     ["redemptions","🎁 Redemptions"],["specials","🏷 Specials"],["rewards","🎁 Rewards"],
     ["points","⭐ Points"],["settings","⚙ Settings"],["notifs",`🔔${unread>0?" ("+unread+")":""}`],["export","📥 Export"],
@@ -2468,40 +2491,7 @@ function AdminScreen({TH, members,rewards,bookings,waitlist,promoOffers,setPromo
 
         {/* ── MEMBERS ── */}
         {tab==="members"&&(
-          <div className="fu">
-            {/* Tier breakdown */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
-              {TIERS.map(t=>{
-                const cnt=members.filter(m=>getTier(m.points).name===t.name).length;
-                return(
-                  <div key={t.name} style={{background:TH.bgCard,border:"1px solid "+t.color+"33",borderRadius:13,padding:"11px 8px",textAlign:"center"}}>
-                    <div style={{fontSize:18}}>{t.icon}</div>
-                    <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:t.color,lineHeight:1.1}}>{cnt}</div>
-                    <div style={{fontSize:8,color:TH.textFaint,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginTop:2}}>{t.name}</div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {[...members].sort((a,b)=>b.points-a.points).map((m,i)=>{
-                const t=getTier(m.points);
-                return(
-                  <div key={m.id} style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:14,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,animation:"fadeUp .3s ease "+i*.03+"s both"}}>
-                    <div style={{width:10,textAlign:"center",fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:TH.textFaint,flexShrink:0}}>{i+1}</div>
-                    <div style={{width:38,height:38,borderRadius:"50%",background:t.color+"30",border:"2px solid "+t.color+"60",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:12,color:t.color,flexShrink:0,overflow:"hidden"}}>{m.photoUrl?<img src={m.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:m.avatar}</div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:700,color:TH.text}}>{m.name}</div>
-                      <div style={{fontSize:10,color:TH.textMid,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.icon} {t.name} · {m.bookings} sessions · {m.phone}</div>
-                    </div>
-                    <div style={{textAlign:"right",flexShrink:0}}>
-                      <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:t.color,lineHeight:1}}>{fmt(m.points)}</div>
-                      <div style={{fontSize:9,color:TH.textFaint,fontWeight:700}}>pts</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <AdminMembersTab TH={TH} members={members} onRemoveMember={onRemoveMember}/>
         )}
 
         {/* ── WAITLIST ── */}
@@ -2584,6 +2574,12 @@ function AdminScreen({TH, members,rewards,bookings,waitlist,promoOffers,setPromo
               </div>
             )}
           </div>
+        )}
+
+        {/* ── DAILY REPORT (admin version) ── */}
+        {tab==="daily"&&(
+          <ReceptionScreen TH={TH} bookings={bookings} members={members} settings={settings}
+            onUpdateBooking={onUpdateBooking} onBack={()=>setTab("today")} isAdmin={true}/>
         )}
 
         {/* ── BLOCKOUTS ── */}
@@ -4024,6 +4020,306 @@ function AdminTournamentsTab({TH, tournaments, members, onUpdate, onCreate, SI})
   );
 }
 
+
+// ─── ADMIN MEMBERS TAB ────────────────────────────────────────────────────────
+function AdminMembersTab({TH, members, onRemoveMember}) {
+  const [search, setSearch] = useState("");
+  const [confirm, setConfirm] = useState(null);
+
+  const filtered = search.trim().length>1
+    ? members.filter(m=>m.name?.toLowerCase().includes(search.toLowerCase())||m.email?.toLowerCase().includes(search.toLowerCase())||m.phone?.includes(search))
+    : [...members].sort((a,b)=>b.points-a.points);
+
+  const SI={background:TH.bgInput,border:"1.5px solid "+TH.border,borderRadius:11,padding:"10px 13px",color:TH.text,fontSize:13,width:"100%",outline:"none"};
+
+  return(
+    <div className="fu">
+      {/* Tier summary */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {TIERS.map(t=>{
+          const cnt=members.filter(m=>getTier(m.points).name===t.name).length;
+          return(
+            <div key={t.name} style={{background:TH.bgCard,border:"1px solid "+t.color+"33",borderRadius:13,padding:"11px 8px",textAlign:"center"}}>
+              <div style={{fontSize:16}}>{t.icon}</div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:t.color,lineHeight:1.1}}>{cnt}</div>
+              <div style={{fontSize:8,color:TH.textFaint,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginTop:2}}>{t.name}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Search */}
+      <input placeholder="Search by name, email or phone..." value={search} onChange={e=>setSearch(e.target.value)} style={{...SI,marginBottom:12}}/>
+
+      <div style={{fontSize:10,fontWeight:800,color:TH.textMid,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>
+        {filtered.length} member{filtered.length!==1?"s":""}
+      </div>
+
+      {filtered.length===0&&(
+        <div style={{textAlign:"center",padding:"40px",color:TH.textFaint,fontSize:13}}>No members found</div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filtered.map((m,i)=>{
+          const t=getTier(m.points);
+          return(
+            <div key={m.id} style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:14,padding:"12px 14px",animation:"fadeUp .2s ease "+i*.02+"s both"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:t.color+"30",border:"2px solid "+t.color+"60",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:t.color,flexShrink:0,overflow:"hidden"}}>
+                  {m.photoUrl?<img src={m.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:m.avatar}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:800,color:TH.text}}>{m.name}</div>
+                  <div style={{fontSize:10,color:TH.textMid}}>{m.email}</div>
+                  <div style={{fontSize:10,color:TH.textMid}}>{m.phone} · {t.icon} {t.name} · {fmt(m.points)} pts · {m.bookings||0} sessions</div>
+                  <div style={{fontSize:10,color:TH.textFaint}}>Joined: {m.joined} · Gender: {m.gender||"—"}</div>
+                </div>
+                <div style={{flexShrink:0}}>
+                  {confirm===m.id?(
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      <button onClick={()=>{onRemoveMember&&onRemoveMember(m.id);setConfirm(null);}}
+                        style={{padding:"5px 10px",borderRadius:8,border:"none",background:"#ef4444",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        Confirm Remove
+                      </button>
+                      <button onClick={()=>setConfirm(null)}
+                        style={{padding:"4px 10px",borderRadius:8,border:"1px solid "+TH.border,background:"transparent",color:TH.textMid,fontSize:10,cursor:"pointer"}}>
+                        Cancel
+                      </button>
+                    </div>
+                  ):(
+                    <button onClick={()=>setConfirm(m.id)}
+                      style={{padding:"5px 12px",borderRadius:9,border:"1.5px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.07)",color:"#ef4444",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── RECEPTION SCREEN ─────────────────────────────────────────────────────────
+function ReceptionScreen({TH, bookings, members, settings, onUpdateBooking, onBack}) {
+  const [tab, setTab]   = useState("today");
+  const [search, setSearch] = useState("");
+  const [endDay, setEndDay] = useState(false);
+
+  const todayKey = new Date().toISOString().slice(0,10);
+  const todayBks = (bookings||[]).filter(b=>b.dateKey===todayKey).sort((a,b)=>a.time.localeCompare(b.time));
+  const allBks   = (bookings||[]).filter(b=>b.dateKey===todayKey||b.status!=="cancelled");
+  const searched = search.trim().length>1
+    ? todayBks.filter(b=>b.name?.toLowerCase().includes(search.toLowerCase())||b.ref?.toLowerCase().includes(search.toLowerCase()))
+    : todayBks;
+
+  const totalRev    = todayBks.filter(b=>b.status!=="cancelled").reduce((s,b)=>s+(b.price||0),0);
+  const paidRev     = todayBks.filter(b=>b.paid).reduce((s,b)=>s+(b.price||0),0);
+  const unpaidRev   = totalRev - paidRev;
+  const cashCount   = todayBks.filter(b=>b.paid&&b.payMethod==="cash").length;
+  const airtelCount = todayBks.filter(b=>b.paid&&b.payMethod==="airtel").length;
+
+  function markPaid(id, method) {
+    onUpdateBooking(id, {paid:true, payMethod:method, paidAt:new Date().toISOString()});
+  }
+  function markUnpaid(id) {
+    onUpdateBooking(id, {paid:false, payMethod:null, paidAt:null});
+  }
+
+  const SI = {background:TH.bgInput,border:"1.5px solid "+TH.border,borderRadius:11,padding:"9px 12px",color:TH.text,fontSize:13,width:"100%",outline:"none"};
+
+  return(
+    <div style={{minHeight:"100vh",background:TH.bg,paddingBottom:20}}>
+      {/* Header */}
+      <div style={{background:TH.bgCard,borderBottom:"1px solid "+TH.border,padding:"50px 18px 0"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <button onClick={onBack} style={{background:"transparent",border:"none",color:TH.textMid,fontSize:13,fontWeight:700,cursor:"pointer"}}>← Exit</button>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,letterSpacing:2,color:TH.text}}>Reception</div>
+            <div style={{fontSize:10,color:TH.textMid}}>ACE Padel · {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:9,color:TH.textFaint,fontWeight:700,textTransform:"uppercase"}}>Today's Revenue</div>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:20,color:"#22c55e",lineHeight:1}}>MWK {fmt(paidRev)}</div>
+            <div style={{fontSize:9,color:"#f59e0b"}}>MWK {fmt(unpaidRev)} unpaid</div>
+          </div>
+        </div>
+        {/* Tabs */}
+        <div style={{display:"flex",gap:0}}>
+          {[["today","📋 Today"],["report","📊 End of Day"]].map(([id,lbl])=>(
+            <button key={id} onClick={()=>setTab(id)} style={{flex:1,padding:"10px",border:"none",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:tab===id?TH.text:TH.textMid,borderBottom:tab===id?"2px solid #f97316":"2px solid transparent"}}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{padding:"14px 16px"}}>
+
+        {/* ── TODAY'S BOOKINGS ── */}
+        {tab==="today"&&(
+          <div className="fu">
+            {/* Search */}
+            <input placeholder="Search by name or ref..." value={search} onChange={e=>setSearch(e.target.value)}
+              style={{...SI,marginBottom:12}}/>
+
+            {/* Stats row */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+              {[
+                {l:"Bookings",v:todayBks.filter(b=>b.status!=="cancelled").length,c:TH.accent},
+                {l:"Paid",v:todayBks.filter(b=>b.paid).length,c:"#22c55e"},
+                {l:"Unpaid",v:todayBks.filter(b=>!b.paid&&b.status!=="cancelled").length,c:"#f59e0b"},
+              ].map(s=>(
+                <div key={s.l} style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:12,padding:"10px",textAlign:"center"}}>
+                  <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:s.c,lineHeight:1}}>{s.v}</div>
+                  <div style={{fontSize:9,color:TH.textFaint,fontWeight:700,textTransform:"uppercase",marginTop:2}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {searched.length===0&&(
+              <div style={{textAlign:"center",padding:"40px",color:TH.textFaint,fontSize:13}}>No bookings today</div>
+            )}
+
+            {searched.map((b,i)=>{
+              const sC = b.status==="confirmed"?"#22c55e":b.status==="cancelled"?"#ef4444":"#f59e0b";
+              const hasCode = b.voucherCode;
+              return(
+                <div key={b.id} style={{background:TH.bgCard,border:"1px solid "+(b.paid?"rgba(34,197,94,.25)":TH.border),borderRadius:16,padding:"14px",marginBottom:10,animation:"fadeUp .2s ease "+i*.03+"s both"}}>
+                  {/* Header row */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div>
+                      <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:15,letterSpacing:2,color:"#06b6d4"}}>{b.ref}</div>
+                      <div style={{fontSize:13,fontWeight:800,color:TH.text}}>{b.name}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:14,fontWeight:900,color:"#22c55e"}}>MWK {fmt(b.price||0)}</div>
+                      {b.paid&&<div style={{fontSize:9,fontWeight:800,color:"#22c55e"}}>✓ {b.payMethod==="airtel"?"AIRTEL":"CASH"}</div>}
+                    </div>
+                  </div>
+                  {/* Details */}
+                  <div style={{fontSize:11,color:TH.textMid,marginBottom:10}}>
+                    Court {b.courtId} · {b.time}–{b.endTime} · {b.pk?"Peak":"Off-Peak"} · {b.dur===2?"2hrs":"1hr"}
+                  </div>
+                  {/* Voucher code if used */}
+                  {hasCode&&(
+                    <div style={{padding:"8px 12px",background:"rgba(167,139,250,.1)",border:"1px solid rgba(167,139,250,.3)",borderRadius:10,marginBottom:10}}>
+                      <div style={{fontSize:9,fontWeight:800,color:"#a78bfa",textTransform:"uppercase",letterSpacing:1}}>Reward Voucher Applied</div>
+                      <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:3,color:"#a78bfa"}}>{b.voucherCode}</div>
+                      <div style={{fontSize:11,color:TH.textMid}}>Discount: MWK {fmt(b.voucherDiscount||0)} · Final: MWK {fmt((b.price||0)-(b.voucherDiscount||0))}</div>
+                    </div>
+                  )}
+                  {/* Payment actions */}
+                  {b.status!=="cancelled"&&(
+                    b.paid?(
+                      <button onClick={()=>markUnpaid(b.id)} style={{width:"100%",padding:"9px",borderRadius:10,border:"1.5px solid rgba(239,68,68,.3)",background:"transparent",color:"#ef4444",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        ↩ Mark Unpaid
+                      </button>
+                    ):(
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        <button onClick={()=>markPaid(b.id,"cash")} style={{padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#22c55e,#15803d)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                          💵 Cash Paid
+                        </button>
+                        <button onClick={()=>markPaid(b.id,"airtel")} style={{padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#f97316,#b45309)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                          📱 Airtel Paid
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── END OF DAY REPORT ── */}
+        {tab==="report"&&(
+          <div className="fu">
+            <div style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:18,padding:"18px",marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:800,letterSpacing:2,color:TH.textMid,textTransform:"uppercase",marginBottom:14}}>
+                End of Day — {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+              </div>
+
+              {/* Revenue summary */}
+              <div style={{background:"rgba(34,197,94,.08)",border:"1px solid rgba(34,197,94,.2)",borderRadius:14,padding:"14px",marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:800,color:"#22c55e",textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>💰 Revenue Summary</div>
+                {[
+                  ["Total Sessions",todayBks.filter(b=>b.status!=="cancelled").length+" bookings"],
+                  ["Gross Revenue","MWK "+fmt(totalRev)],
+                  ["Cash Collected","MWK "+fmt(todayBks.filter(b=>b.paid&&b.payMethod==="cash").reduce((s,b)=>s+(b.price||0),0))],
+                  ["Airtel Money","MWK "+fmt(todayBks.filter(b=>b.paid&&b.payMethod==="airtel").reduce((s,b)=>s+(b.price||0),0))],
+                  ["Total Collected","MWK "+fmt(paidRev)],
+                  ["Outstanding","MWK "+fmt(unpaidRev)],
+                ].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(34,197,94,.1)"}}>
+                    <span style={{fontSize:12,color:TH.textMid}}>{k}</span>
+                    <span style={{fontSize:12,fontWeight:800,color:k==="Total Collected"?"#22c55e":k==="Outstanding"?"#f59e0b":TH.text}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Court breakdown */}
+              <div style={{background:TH.bgCard2||TH.bgInput,border:"1px solid "+TH.border,borderRadius:14,padding:"14px",marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:800,color:TH.textMid,textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>🎾 Court Breakdown</div>
+                {[1,2].map(ct=>{
+                  const ctBks = todayBks.filter(b=>b.courtId===ct&&b.status!=="cancelled");
+                  const ctRev = ctBks.reduce((s,b)=>s+(b.price||0),0);
+                  return(
+                    <div key={ct} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid "+TH.border}}>
+                      <span style={{fontSize:12,color:TH.textMid}}>Court {ct} — {ctBks.length} sessions</span>
+                      <span style={{fontSize:12,fontWeight:800,color:TH.text}}>MWK {fmt(ctRev)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Vouchers used */}
+              {todayBks.filter(b=>b.voucherCode).length>0&&(
+                <div style={{background:"rgba(167,139,250,.08)",border:"1px solid rgba(167,139,250,.2)",borderRadius:14,padding:"14px",marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#a78bfa",textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>🎁 Vouchers Used Today</div>
+                  {todayBks.filter(b=>b.voucherCode).map(b=>(
+                    <div key={b.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid rgba(167,139,250,.1)"}}>
+                      <span style={{fontSize:11,color:TH.textMid}}>{b.name} · {b.voucherCode}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:"#a78bfa"}}>-MWK {fmt(b.voucherDiscount||0)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Session list */}
+              <div style={{fontSize:10,fontWeight:800,color:TH.textMid,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>All Sessions</div>
+              {todayBks.length===0&&<div style={{textAlign:"center",padding:"20px",color:TH.textFaint,fontSize:12}}>No sessions today</div>}
+              {todayBks.map(b=>(
+                <div key={b.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid "+TH.border}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:TH.text}}>{b.name}</div>
+                    <div style={{fontSize:10,color:TH.textMid}}>Court {b.courtId} · {b.time}–{b.endTime}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:12,fontWeight:800,color:b.paid?"#22c55e":"#f59e0b"}}>MWK {fmt(b.price||0)}</div>
+                    <div style={{fontSize:9,color:b.paid?"#22c55e":"#f59e0b"}}>{b.paid?(b.payMethod==="airtel"?"AIRTEL":"CASH"):"UNPAID"}</div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Sign off */}
+              <div style={{marginTop:18,padding:"12px 14px",background:"rgba(249,115,22,.08)",border:"1px solid rgba(249,115,22,.2)",borderRadius:12,textAlign:"center"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#f97316",marginBottom:4}}>Ready to close?</div>
+                <div style={{fontSize:11,color:TH.textMid,marginBottom:10}}>Total collected today: <strong style={{color:"#22c55e"}}>MWK {fmt(paidRev)}</strong></div>
+                <button onClick={()=>setEndDay(true)} style={{padding:"10px 24px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f97316,#b45309)",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                  ✓ End of Day — Close
+                </button>
+                {endDay&&<div style={{marginTop:10,fontSize:13,fontWeight:800,color:"#22c55e"}}>✓ Day closed. Have a great evening!</div>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── BLOCKOUTS TAB ────────────────────────────────────────────────────────────
 function AdminBlockoutsTab({TH, blockouts, onAdd, onRemove}) {
