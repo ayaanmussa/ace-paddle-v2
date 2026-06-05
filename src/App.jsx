@@ -30,15 +30,20 @@ const db = {
     try {
       const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
         method:"POST",
-        headers:{...db.headers, "Prefer":"return=minimal"},
+        headers:{
+          "apikey": SUPABASE_ANON,
+          "Authorization": "Bearer " + SUPABASE_ANON,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
         body:JSON.stringify(row)
       });
-      if(r.status===201||r.status===200) return row; // success
+      if(r.status===201||r.status===200||r.status===204) return row;
       const errText = await r.text();
       console.warn(`Supabase insert error (${r.status}):`, errText);
       return null;
     } catch(e) {
-      console.warn("Supabase insert network error:", e);
+      console.warn("Supabase insert network error:", e.message);
       return null;
     }
   },
@@ -2228,7 +2233,7 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
     // Save to Supabase — must succeed before proceeding
     const saved = await db.insert("members", memberToDb(m));
     if(saved===null) {
-      setErr("Could not save account. Please try a different email or check your connection.");
+      setErr("Could not save account. Please try again or use mobile data.");
       return;
     }
     setErr("");
