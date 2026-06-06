@@ -442,7 +442,7 @@ export default function Root() {
       `}</style>
 
       {screen==="splash"   && <SplashScreen/>}
-      {screen==="home"     && <HomeScreen member={member} onNav={setScreen} onLogin={()=>setScreen("login")} onRegister={()=>setScreen("register")} TH={TH} themeKey={themeKey} onToggleTheme={toggleTheme}/>}
+      {screen==="home"     && <HomeScreen member={member} friends={friends} onNav={setScreen} onLogin={()=>setScreen("login")} onRegister={()=>setScreen("register")} TH={TH} themeKey={themeKey} onToggleTheme={toggleTheme}/>}
       {screen==="book"     && <BookScreen
           TH={TH}
           member={member}
@@ -621,7 +621,7 @@ function SplashScreen() {
 // ═══════════════════════════════════════════════════════════════
 // HOME
 // ═══════════════════════════════════════════════════════════════
-function HomeScreen({member, onNav, onLogin, onRegister, TH, themeKey, onToggleTheme}) {
+function HomeScreen({member, friends, onNav, onLogin, onRegister, TH, themeKey, onToggleTheme}) {
   const tier = member ? getTier(member.points) : null;
   const nextTier = member ? TIERS[TIERS.findIndex(t=>t.name===tier.name)+1] : null;
   const progress = member && nextTier ? ((member.points - tier.min)/(nextTier.min - tier.min))*100 : 100;
@@ -727,7 +727,7 @@ function HomeScreen({member, onNav, onLogin, onRegister, TH, themeKey, onToggleT
         {/* Stats row */}
         {member&&(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-            {[{l:"Sessions",v:member.bookings},{l:"Points",v:fmt(member.points)},{l:"Friends",v:3}].map(s=>(
+            {[{l:"Sessions",v:member.bookings||0},{l:"Points",v:fmt(member.points)},{l:"Friends",v:friends.length}].map(s=>(
               <div key={s.l} style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:16,padding:"14px 12px",textAlign:"center"}}>
                 <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:TH.accent,lineHeight:1}}>{s.v}</div>
                 <div style={{fontSize:9,color:TH.textFaint,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginTop:3}}>{s.l}</div>
