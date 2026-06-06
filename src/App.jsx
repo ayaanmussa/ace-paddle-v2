@@ -31,8 +31,14 @@ async function dbInsert(table, row) {
       headers: h,
       body: JSON.stringify(row)
     });
-    return r.status >= 200 && r.status < 300;
-  } catch(e) { return false; }
+    if(r.status >= 200 && r.status < 300) return true;
+    const errText = await r.text();
+    console.warn("dbInsert failed:", r.status, errText);
+    return errText || ("HTTP " + r.status);
+  } catch(e) {
+    console.warn("dbInsert network error:", e.message);
+    return "Network error: " + e.message;
+  }
 }
 
 async function dbUpdate(table, row, match) {
@@ -2182,8 +2188,8 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
     const m = {id:"m"+Date.now(),name:f.name.trim(),email:f.email.trim(),phone:f.phone.trim(),password:f.password.trim(),gender:f.gender,points:100,tier:"Bronze",avatar:initials,joined:new Date().toISOString().slice(0,10),bookings:0,wins:0,ratingTotal:0,ratingCount:0,showOnLeaderboard:f.showOnLeaderboard,showRating:f.showRating};
     // Save to Supabase — must succeed before proceeding
     const saved = await dbInsert("members", memberToDb(m));
-    if(!saved) {
-      setErr("Could not save account. Please try again or use mobile data.");
+    if(saved!==true) {
+      setErr("Save failed: " + (typeof saved==="string" ? saved : "Unknown error"));
       return;
     }
     setErr("");
