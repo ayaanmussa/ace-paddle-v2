@@ -2005,7 +2005,7 @@ function ProfileScreen({TH, member, members, friends, setFriends, setMembers, se
         {tab==="profile"&&(
           <><div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              {[{l:"Sessions",v:member.bookings,c:"#f97316"},{l:"Points",v:fmt(member.points),c:tier.color},{l:"Friends",v:friendMembers.length,c:"#06b6d4"},{l:"Tier",v:tier.name,c:tier.color}].map(s=>(
+              {[{l:"Sessions",v:member.bookings||0,c:"#f97316"},{l:"Points",v:fmt(member.points),c:tier.color},{l:"Friends",v:friends.length,c:"#06b6d4"},{l:"Tier",v:tier.name,c:tier.color}].map(s=>(
                 <div key={s.l} style={{background:TH.bgCard,border:"1px solid "+TH.border,borderRadius:16,padding:"14px"}}>
                   <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:24,color:s.c,lineHeight:1}}>{s.v}</div>
                   <div style={{fontSize:9,color:TH.textFaint,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginTop:3}}>{s.l}</div>
