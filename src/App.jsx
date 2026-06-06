@@ -4,123 +4,76 @@
 const SUPABASE_URL  = "https://hibardeplmlrrikspgpk.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpYmFyZGVwbG1scnJpa3NwZ3BrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MDUwNTgsImV4cCI6MjA5NjA4MTA1OH0.lER3E3gP0zte6imbP-LzZBOKGD_K25flkkd4H-H1S6A";
 
-// Lightweight Supabase REST client
-const db = {
-  headers: {
+// ── SUPABASE FUNCTIONS ──────────────────────────────────────────────────────
+function getHeaders() {
+  return {
     "apikey": SUPABASE_ANON,
     "Authorization": "Bearer " + SUPABASE_ANON,
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
-  },
+    "Content-Type": "application/json"
+  };
+}
 
-  async select(table, query="") {
-    try {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${query}`, {
-        headers: db.headers
-      });
-      if(!r.ok) { console.warn("Supabase select error:", r.status, await r.text()); return []; }
-      return r.json();
-    } catch(e) {
-      console.warn("Supabase select network error:", e);
-      return [];
-    }
-  },
+async function dbSelect(table, filter) {
+  try {
+    const url = SUPABASE_URL + "/rest/v1/" + table + "?select=*" + (filter||"");
+    const r = await fetch(url, {headers: getHeaders()});
+    if(!r.ok) return [];
+    return await r.json();
+  } catch(e) { return []; }
+}
 
-  async insert(table, row) {
-    try {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-        method:"POST",
-        headers:{
-          "apikey": SUPABASE_ANON,
-          "Authorization": "Bearer " + SUPABASE_ANON,
-          "Content-Type": "application/json",
-          "Prefer": "return=minimal"
-        },
-        body:JSON.stringify(row)
-      });
-      if(r.status===201||r.status===200||r.status===204) return row;
-      const errText = await r.text();
-      console.warn(`Supabase insert error (${r.status}):`, errText);
-      return null;
-    } catch(e) {
-      console.warn("Supabase insert network error:", e.message);
-      return null;
-    }
-  },
-
-  async update(table, row, match) {
-    const q = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${q}`, {
-      method:"PATCH", headers:db.headers, body:JSON.stringify(row)
+async function dbInsert(table, row) {
+  try {
+    const h = getHeaders();
+    h["Prefer"] = "return=minimal";
+    const r = await fetch(SUPABASE_URL + "/rest/v1/" + table, {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify(row)
     });
-    if(!r.ok) { console.warn("Supabase update error:", await r.text()); return null; }
-    return r.json();
-  },
+    return r.status >= 200 && r.status < 300;
+  } catch(e) { return false; }
+}
 
-  async delete(table, match) {
-    const q = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${q}`, {
-      method:"DELETE", headers:db.headers
+async function dbUpdate(table, row, match) {
+  try {
+    const q = Object.entries(match).map(function(e){return e[0]+"=eq."+encodeURIComponent(e[1]);}).join("&");
+    const h = getHeaders();
+    h["Prefer"] = "return=minimal";
+    const r = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?" + q, {
+      method: "PATCH",
+      headers: h,
+      body: JSON.stringify(row)
     });
-    if(!r.ok) { console.warn("Supabase delete error:", await r.text()); return null; }
-    return r.json();
-  },
+    return r.ok;
+  } catch(e) { return false; }
+}
 
-  // Realtime polling — checks for new records every 6 seconds
-  _polls: {},
-  startPolling(table, onNew, interval=6000) {
-    if(db._polls[table]) return;
-    let lastId = null;
-    db._polls[table] = setInterval(async()=>{
-      try {
-        const rows = await db.select(table, "&order=created_at.desc&limit=5");
-        if(!rows?.length) return;
-        const newest = rows[0];
-        if(lastId && newest.id !== lastId) {
-          // New records appeared
-          rows.filter(r=>r.id!==lastId).forEach(r=>onNew(r));
-        }
-        lastId = newest.id;
-      } catch(e){}
-    }, interval);
-  },
-  stopPolling(table) {
-    if(db._polls[table]) { clearInterval(db._polls[table]); delete db._polls[table]; }
-  },
-
-  // WebSocket realtime
-  subscribe(table, callback) {
+// Keep db and sb as aliases
+const db = {
+  headers: getHeaders(),
+  select: dbSelect,
+  insert: dbInsert,
+  update: dbUpdate,
+  subscribe: function(table, cb) {
     try {
-      const wsUrl = SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
-      const ws = new WebSocket(wsUrl);
-      ws.onopen = () => ws.send(JSON.stringify({
-        topic:`realtime:public:${table}`, event:"phx_join",
-        payload:{ config:{ postgres_changes:[{event:"*",schema:"public",table}] } }, ref:"1"
-      }));
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          const rec = msg?.payload?.data?.record;
-          if(rec) callback(rec);
-        } catch(e){}
+      const ws = new WebSocket(SUPABASE_URL.replace("https","wss") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0");
+      ws.onopen = function() {
+        ws.send(JSON.stringify({topic:"realtime:public:"+table,event:"phx_join",payload:{config:{postgres_changes:[{event:"*",schema:"public",table:table}]}},ref:"1"}));
       };
-      return ()=>ws.close();
-    } catch(e) { return ()=>{}; }
-  },
+      ws.onmessage = function(e) {
+        try { var msg=JSON.parse(e.data); if(msg&&msg.payload&&msg.payload.data&&msg.payload.data.record) cb(msg.payload.data.record); } catch(x){}
+      };
+      return function(){ws.close();};
+    } catch(e) { return function(){}; }
+  }
+};
+const sb = {
+  from: function(table) { return {select:function(){return dbSelect(table);},insert:function(row){return dbInsert(table,row);},update:function(row,match){return dbUpdate(table,row,match);}}; },
+  headers: getHeaders(),
+  subscribe: function(t,ev,cb){return db.subscribe(t,cb);}
 };
 
-// Keep sb as alias for backward compat
-const sb = {
-  from: (table) => ({
-    select: (cols="*") => db.select(table),
-    insert: (row) => db.insert(table, row),
-    update: (row, match) => db.update(table, row, match),
-    delete: (match) => db.delete(table, match),
-  }),
-  headers: db.headers,
-  subscribe: (table, event, cb) => db.subscribe(table, cb),
-  _listeners: {},
-};
 import { useState, useEffect, useRef } from "react";
 
 // ═══════════════════════════════════════════════════════════════
@@ -383,11 +336,11 @@ export default function Root() {
       const minSplash = new Promise(r=>setTimeout(r, 1800)); // min 1.8s splash
 
       Promise.all([
-        db.select("bookings"),
-        db.select("members"),
-        db.select("blockouts"),
-        db.select("waitlist"),
-        db.select("notifications"),
+        dbSelect("bookings"),
+        dbSelect("members"),
+        dbSelect("blockouts"),
+        dbSelect("waitlist"),
+        dbSelect("notifications"),
         minSplash,
       ]).then(([bks, mems, bls, wl, notifs])=>{
         if(bks?.length)  setBookings(bks.map(dbToBooking));
@@ -402,10 +355,7 @@ export default function Root() {
             setMember(dbToMember(mem));
           } else if(session.id) {
             // Fetch this member directly from Supabase by ID
-            fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${session.id}&select=*`,{headers:db.headers})
-              .then(r=>r.json())
-              .then(rows=>{ if(rows?.[0]) setMember(dbToMember(rows[0])); })
-              .catch(()=>{});
+            dbSelect("members","&id=eq."+session.id).then(function(rows){ if(rows&&rows[0]) setMember(dbToMember(rows[0])); });
           }
         }
       }).catch(e=>console.warn("Supabase load error:", e))
@@ -430,8 +380,8 @@ export default function Root() {
     // Polling fallback — reload bookings every 8 seconds
     const stopPoll = setInterval(async()=>{
       try {
-        const bks = await db.select("bookings");
-        if(bks?.length) setBookings(bks.map(dbToBooking));
+        const bks = await dbSelect("bookings");
+        if(bks&&bks.length) setBookings(bks.map(dbToBooking));
       } catch(e){}
     }, 8000);
     return()=>{ unsubBookings(); unsubMembers(); clearInterval(stopPoll); };
@@ -497,7 +447,7 @@ export default function Root() {
             setBookings(bs=>[bk,...bs]);
             setNotifications(ns=>[{id:"n"+Date.now(),bookingId:bk.id,type:"new",msg:"📩 New: "+bk.name+" — Court "+bk.courtId+" · "+bk.date+" · "+bk.time+"–"+bk.endTime+" · "+bk.ref,time:new Date().toISOString(),read:false},...ns]);
             // Step 2: Persist to Supabase (broadcasts to all devices via realtime)
-            try { await db.insert("bookings", bookingToDb(bk)); }
+            try { await dbInsert("bookings", bookingToDb(bk)); }
             catch(e){ console.warn("Booking save error:",e); }
           }}
           onWaitlist={w=>setWaitlist(ws=>[w,...ws])}
@@ -2231,8 +2181,8 @@ function RegisterScreen({TH, onDone, onBack, onLogin}) {
     const initials = f.name.trim().split(" ").map(x=>x[0]).join("").slice(0,2).toUpperCase();
     const m = {id:"m"+Date.now(),name:f.name.trim(),email:f.email.trim(),phone:f.phone.trim(),password:f.password.trim(),gender:f.gender,points:100,tier:"Bronze",avatar:initials,joined:new Date().toISOString().slice(0,10),bookings:0,wins:0,ratingTotal:0,ratingCount:0,showOnLeaderboard:f.showOnLeaderboard,showRating:f.showRating};
     // Save to Supabase — must succeed before proceeding
-    const saved = await db.insert("members", memberToDb(m));
-    if(saved===null) {
+    const saved = await dbInsert("members", memberToDb(m));
+    if(!saved) {
       setErr("Could not save account. Please try again or use mobile data.");
       return;
     }
@@ -2325,12 +2275,7 @@ function LoginScreen({TH, members, onDone, onBack, onRegister}) {
     try {
       // Query Supabase directly with case-insensitive email match
       const emailClean = email.trim().toLowerCase();
-      const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/members?email=ilike.${encodeURIComponent(emailClean)}&select=*`,
-        { headers: db.headers }
-      );
-      if(!r.ok){ setErr("Connection error. Please try again."); return; }
-      const rows = await r.json();
+      const rows = await dbSelect("members", "&email=ilike."+encodeURIComponent(emailClean));
       if(!rows?.length){ setErr("No account found with that email"); return; }
       const m = dbToMember(rows[0]);
       const correct = m.password||"demo1234";
